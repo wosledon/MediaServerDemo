@@ -15,19 +15,21 @@ namespace MediaServerDemo.Controllers
     [ApiController]
     public class StreamingController : ControllerBase
     {
-        private static readonly ConcurrentDictionary<string, Channel<byte[]>> Channels = new ConcurrentDictionary<string, Channel<byte[]>>();
+        //private static readonly ConcurrentDictionary<string, Channel<byte[]>> Channels = new ConcurrentDictionary<string, Channel<byte[]>>();
 
+        private static readonly ConcurrentDictionary<string, WeakReference<Channel<byte[]>>> Channels = new ConcurrentDictionary<string, WeakReference<Channel<byte[]>>>();
 
-        private  static readonly VideoStreamManager Manager = new VideoStreamManager();
+        private static readonly VideoStreamManager Manager = new VideoStreamManager();
 
         [HttpPost("{id}")]
         [RequestSizeLimit(100_000_000)] // Limit the request size to 10MB
         public async Task<IActionResult> Post(string id)
         {
-            if (!Channels.TryGetValue(id, out var channel) || !channel.Writer.TryWrite([]))
+            if (!Channels.TryGetValue(id, out var weakReference) || !weakReference.TryGetTarget(out var channel) || channel.Writer.TryWrite([]))
             {
                 channel = Channel.CreateUnbounded<byte[]>();
-                Channels[id] = channel;
+
+                Channels[id] = new WeakReference<Channel<byte[]>>(channel);
             }
             var data = ArrayPool<byte>.Shared.Rent(8192);
             try
@@ -73,7 +75,7 @@ namespace MediaServerDemo.Controllers
         [HttpGet("{id}")]
         public IActionResult Get(string id)
         {
-            if (Channels.TryGetValue(id, out var channel))
+            if (Channels.TryGetValue(id, out var weakReference) && weakReference.TryGetTarget(out var channel))
             {
                 return new PushStreamResult(async outputStream =>
                 {
